@@ -1,0 +1,106 @@
+How to Run the Project
+
+ Prerequisites
+
+1. Python 3.x: Ensure Python 3.x is installed on your system. You can verify your installation by running:
+  
+    python3 --version
+    or
+    python --version
+    
+2. Install Dependencies: The project uses the cryptography library for AES encryption. Install it by running the following command in your terminal:
+
+    pip3 install cryptography
+    or
+    pip install cryptography
+    
+3. Project Files: Create the following files in the same directory:
+    - server.py (Server implementation)
+    - client.py (Client implementation)
+    - crypto.py (Cryptographic functions)
+    - test.py (Testing script for crypto functions)
+    
+    Additionally, ensure you have a file named risk.bmp in the same directory as these scripts. This file is used by the server for reading and transmitting data.
+    
+ Running the Project
+ Step 1: Test Crypto Functions
+
+Before running the server and client, it's recommended to test the cryptographic functions to ensure everything works as expected.
+
+Run the test.py script to verify the encryption, decryption, and byte manipulation functions:
+
+python test.py
+
+If successful, you will see the following output:
+
+[INFO] Decompose and recompose test passed.
+[INFO] Encryption and decryption test passed.
+
+ Step 2: Start the Server
+
+The server should be started first, as it will listen for incoming connections from clients.
+
+Run the server with the following command:
+
+python server.py
+
+You should see output similar to:
+
+[INFO] Server started, listening on 5555...
+
+This means the server is ready to accept connections.
+
+ Step 3: Start the Client
+
+Once the server is running, start the client to connect to the server and begin receiving encrypted packets.
+
+Run the client in a new terminal window:
+python client.py
+
+If the client connects successfully and decrypts the messages, you will see output like:
+
+
+[INFO] Connected to 127.0.0.1:5555
+[INFO] Successfully decrypted: The quick brown fox jumps over the lazy dog.
+
+
+
+The client will continue receiving and attempting to decrypt packets, sending an acknowledgment (ACK) if successful.
+
+ Optional: Run Multiple Clients
+
+You can run multiple instances of the client.py script to simulate multiple clients connecting to the server. Each client will independently establish a connection and communicate with the server.
+
+To run additional clients, simply open a new terminal window and run:
+
+
+python client.py
+
+ Important Notes
+
+1. Order of Execution:
+    - Always start the server first before starting any clients.
+    - The client needs an active server to connect to, otherwise the connection will fail.
+2. Network Configuration:
+    - The server and client are set up to run on 127.0.0.1 (localhost). If you need them to run on different machines, replace 127.0.0.1 with the server's IP address in both server.py and client.py.
+    - Ensure that no firewall or network restrictions are blocking port 5555.
+3. File Requirements:
+    - The server uses risk.bmp for data transmission. Make sure the file is present in the project directory or modify the path in server.py to point to a valid file.
+4. Shutting Down:
+    - To stop the server or clients, press CTRL+C in the respective terminal window.
+
+ Example Running Order
+
+1. Terminal 1: Start the server.
+    
+    python server.py
+    
+2. Terminal 2: Start the first client.
+    
+    python client.py
+    
+3. Terminal 3 (optional): Start another client.
+    
+    python client.py
+    
+    

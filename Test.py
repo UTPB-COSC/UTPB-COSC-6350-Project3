@@ -1,16 +1,22 @@
-
 from Crypto import *
 
-file_size = 0
-crumbs = []
-with open("risk.bmp", "rb") as dat_file:
-    dat_file.seek(0, 2)
-    file_size = dat_file.tell()
-    dat_file.seek(0)
-    for x in range(16):
-        for crumb in decompose_byte(dat_file.read(1)[0]):
-            crumbs.append(crumb)
+# Test the decompose and recompose functions
+def test_byte_functions():
+    byte = 0b11010111
+    crumbs = decompose_byte(byte)
+    recomposed = recompose_byte(crumbs)
+    assert byte == recomposed, "Decompose and recompose failed!"
+    print("[INFO] Decompose and recompose test passed.")
 
-print(f"{file_size}")
-for crumb in crumbs:
-    print(f"{bin(crumb)}")
+# Test the encryption and decryption functions
+def test_crypto_functions():
+    plaintext = "The quick brown fox jumps over the lazy dog."
+    key = keys[0b00]
+    ciphertext = aes_encrypt(plaintext, key)
+    decrypted_text = aes_decrypt(ciphertext, key)
+    assert plaintext == decrypted_text, "Encryption and decryption failed!"
+    print("[INFO] Encryption and decryption test passed.")
+
+if __name__ == "__main__":
+    test_byte_functions()
+    test_crypto_functions()
