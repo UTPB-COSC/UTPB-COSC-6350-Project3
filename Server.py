@@ -1,74 +1,97 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
+import json
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
+import os
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
-
-
-# Function to handle client connection
-def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
-    try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
-
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
+class QuantumServer:
+    def __init__(self, host='localhost', port=12345):
+        self.host = host    
+        self.port = port
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.bind((self.host, self.port))
+        self.socket.listen(1)
+        self.payload = "The quick brown fox jumps over the lazy dog."
+        self.keys = self._generate_keys()
+        self.bit_pair_to_key = {'00': 0, '01': 1, '10': 2, '11': 3}
+        
+    def _generate_keys(self):
+        keys = []
+        salts = [
+            b'horizontal_salt_000',
+            b'vertical_salt_0001',
+            b'clockwise_salt_002',
+            b'counterclck_salt03'
+        ]
+        
+        for i, salt in enumerate(salts):
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100000,
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(f"polarization{i}".encode()))
+            keys.append(Fernet(key))
+        return keys
+    
+    def read_file(self, filepath):
+        with open(filepath, 'rb') as file:
+            data = file.read()
+        return ''.join(format(byte, '08b') for byte in data)
+    
+    def get_bit_pairs(self, binary_data):
+        return [binary_data[i:i+2] for i in range(0, len(binary_data), 2)]
+    
+    def encrypt_packet(self, bit_pair):
+        key_index = self.bit_pair_to_key[bit_pair]
+        encrypted_data = self.keys[key_index].encrypt(self.payload.encode())
+        return {
+            'encrypted_payload': base64.b64encode(encrypted_data).decode(),
+            'packet_index': self.current_packet_index
+        }
+    
+    def transmit_file(self, filepath):
+        print(f"Server starting transmission of {filepath}")
+        
+        binary_data = self.read_file(filepath)
+        bit_pairs = self.get_bit_pairs(binary_data)
+        total_packets = len(bit_pairs)
+        
+        client_socket, addr = self.socket.accept()
+        print(f"Connection from {addr}")
+        
+        completion = 0
+        while completion < 100:
+            for i, bit_pair in enumerate(bit_pairs):
+                self.current_packet_index = i
+                
+                packet = self.encrypt_packet(bit_pair)
+                client_socket.send(json.dumps(packet).encode())
+                
+                completion_data = client_socket.recv(1024).decode()
+                completion = float(completion_data)
+                
+                print(f"Packet {i}/{total_packets} sent. Current completion: {completion}%")
+                
+                if completion == 100:
                     break
-
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
-
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
-                break
-    except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
-    finally:
-        # Attempt to close connection via FIN/ACK method
+        
+        print("File transmission completed successfully")
+        client_socket.close()
+    
+    def start(self, filepath):
         try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
+            print(f"Quantum Crypto Server starting on {self.host}:{self.port}")
+            self.transmit_file(filepath)
         except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+            print(f"Error during transmission: {e}")
+        finally:
+            self.socket.close()
 
-
-# Main server function
-def start_server():
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
-
-            while True:
-                conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
-                executor.submit(handle_client, conn, addr)
-
-
+# Example usage
 if __name__ == "__main__":
-    start_server()
+    server = QuantumServer()
+    server.start("test_file.txt")
