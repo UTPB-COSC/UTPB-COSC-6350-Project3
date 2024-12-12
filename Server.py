@@ -1,74 +1,106 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
+import threading
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.padding import PKCS7
+import os
+from Crypto import keys  # Import the shared keys
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
+# Server Constants
+HOST = '127.0.0.1'
+PORT = 5555
+FILE_PATH = 'file_to_send.txt'
+STANDARD_PAYLOAD = "The quick brown fox jumps over the lazy dog."
 
+# Encrypt data using AES with the given key
+def aes_encrypt(data, key_hex):
+    key_bytes = bytes.fromhex(key_hex)
+    cipher = Cipher(algorithms.AES(key_bytes), modes.ECB())
+    encryptor = cipher.encryptor()
+    padder = PKCS7(128).padder()
+    padded_data = padder.update(data.encode('utf-8')) + padder.finalize()
+    encrypted = encryptor.update(padded_data) + encryptor.finalize()
+    return encrypted
 
-# Function to handle client connection
-def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
+def client_handler(client_socket, crumbs):
+    """
+    Handle communication with a single client:
+    - Send total crumb count
+    - Wait for ACK
+    - Send encrypted packets corresponding to each crumb until 100% decoded by client
+    """
+
     try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
+        total_crumbs = len(crumbs)
+        # Send total number of crumbs
+        client_socket.send(str(total_crumbs).encode('utf-8'))
+        ack = client_socket.recv(1024)
+        if ack.decode('utf-8') != 'ACK':
+            print("[ERROR] Client did not ACK total_crumbs.")
+            return
 
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
-                    break
+        decoded_count = 0
+        current_index = 0
 
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
+        while decoded_count < total_crumbs:
+            crumb = crumbs[current_index]
+            key_hex = keys[crumb]
+            encrypted_packet = aes_encrypt(STANDARD_PAYLOAD, key_hex)
 
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
+            # Send the encrypted packet
+            client_socket.send(encrypted_packet)
+
+            # Receive client response
+            response = client_socket.recv(1024).decode('utf-8')
+
+            if response.startswith("DECODED:"):
+                decoded_index = int(response.split(":")[1])
+                decoded_count += 1
+                progress = (decoded_count / total_crumbs) * 100
+                print(f"[INFO] Client decoded crumb {decoded_index}. Progress: {progress:.2f}%")
+
+                # Send updated progress to client
+                client_socket.send(f"PROGRESS:{progress:.2f}".encode('utf-8'))
+            elif response == "INVALID":
+                # Client could not decode this packet. We'll just continue sending.
+                pass
+            elif response == "DONE":
                 break
+
+            current_index = (current_index + 1) % total_crumbs
+
+        # Once done, send END signal
+        client_socket.send(b'END')
+
     except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
+        print(f"[ERROR] {e}")
     finally:
-        # Attempt to close connection via FIN/ACK method
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+        client_socket.close()
 
 
-# Main server function
 def start_server():
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
+    # Read file and convert to crumbs
+    with open(FILE_PATH, 'rb') as f:
+        file_bytes = f.read()
 
-            while True:
-                conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
-                executor.submit(handle_client, conn, addr)
+    crumbs = []
+    for byte in file_bytes:
+        # Extract four 2-bit sequences from the byte
+        for shift_amount in [6, 4, 2, 0]:
+            crumb_val = (byte >> shift_amount) & 0b11
+            crumb_str = f"{crumb_val:02b}"
+            if crumb_str in keys:
+                crumbs.append(crumb_str)
+            # If not in keys, skip silently
 
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((HOST, PORT))
+        server_socket.listen(5)
+        print(f"[INFO] Server listening on {HOST}:{PORT}")
+
+        while True:
+            client_socket, addr = server_socket.accept()
+            print(f"[INFO] Connection from {addr} established.")
+            threading.Thread(target=client_handler, args=(client_socket, crumbs)).start()
 
 if __name__ == "__main__":
     start_server()
