@@ -1,0 +1,44 @@
+# Python Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual Environment
+venv/
+.env/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Sensitive Files
+*.env
+
+# Cryptography Keys
+*.pem
+*.key
+
+# Generated Files
+*.bmp
+
+# Cache
+*.cache
+.cache/
+
+# IDE Specific Files
+.vscode/
+.idea/
+
+# Python test output files
+coverage/
+*.coverage
+
+# Temporary Files
+*.tmp
+*.swp
+
+# Test Artifacts
+*.pytest_cache

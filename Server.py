@@ -1,74 +1,74 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
+import threading
+import struct
+from Crypto.Cipher import AES
+from Crypto import keys  
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
+HOST = '127.0.0.1'
+PORT = 5555
 
+def get_crumbs(file_bytes, num_crumbs=4):
+    # Divide file into equal parts
+    crumb_size = len(file_bytes) // num_crumbs
+    crumbs = [file_bytes[i * crumb_size: (i + 1) * crumb_size] for i in range(num_crumbs - 1)]
+    crumbs.append(file_bytes[(num_crumbs - 1) * crumb_size:])  # Last chunk gets remaining bytes
+    return crumbs
 
-# Function to handle client connection
-def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
-    try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
+def encrypt_with_key(plaintext, key):
+    cipher = AES.new(key, AES.MODE_ECB)
+    block_size = 16
+    pad_len = block_size - (len(plaintext) % block_size)
+    padded = plaintext + bytes([pad_len])*pad_len
+    return cipher.encrypt(padded)
 
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
-                    break
+def handle_client(conn, addr, crumbs):
+    # Send total number of crumbs
+    total_crumbs = len(crumbs)
+    conn.sendall(struct.pack('!I', total_crumbs))
+    print(f"[SERVER] Sent total crumb count: {total_crumbs}")
 
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
+    while True:
+        print("[SERVER] Starting a new transmission pass of all crumbs...")
+        for i, crumb in enumerate(crumbs):
+            key = keys[f'{i:02b}']  # Use key '00', '01', '10', '11' for crumbs
+            ciphertext = encrypt_with_key(crumb, key)
+            length = len(ciphertext)
 
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
-                break
-    except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
-    finally:
-        # Attempt to close connection via FIN/ACK method
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+            print(f"[SERVER] Sending crumb {i+1}/{total_crumbs} with key '{i:02b}'")
+            conn.sendall(struct.pack('!I', length))
+            conn.sendall(ciphertext)
 
+        print("[SERVER] All crumbs for this pass sent. Waiting for client fraction...")
+        data = conn.recv(8)
+        if not data:
+            print("[SERVER] No fraction received, assuming client disconnected.")
+            break
 
-# Main server function
-def start_server():
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
+        fraction = struct.unpack('!d', data)[0]
+        print(f"[SERVER] Received fraction from client: {fraction}")
 
-            while True:
-                conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
-                executor.submit(handle_client, conn, addr)
+        if fraction >= 1.0:
+            print("[SERVER] Client has fully decoded the file. Ending connection.")
+            break
 
+    conn.close()
+    print("[SERVER] Connection closed.")
 
-if __name__ == "__main__":
-    start_server()
+def main():
+    with open('textFile.txt', 'rb') as f:
+        file_bytes = f.read()
+
+    crumbs = get_crumbs(file_bytes)  # Split file into 4 crumbs
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((HOST, PORT))
+    s.listen(5)
+    print("[SERVER] Listening on", (HOST, PORT))
+
+    while True:
+        conn, addr = s.accept()
+        print("[SERVER] Connection from", addr)
+        t = threading.Thread(target=handle_client, args=(conn, addr, crumbs))
+        t.start()
+
+if __name__ == '__main__':
+    main()
