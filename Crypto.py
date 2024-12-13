@@ -11,49 +11,45 @@ keys = {
     0b11: 0x45355f125db4449eb07415e8df5e27d4
 }
 
+def decompose_byte(byte):
+    crumbs = []
+    for i in range(4):
+        crumb = (byte >> (i * 2)) & 0b11
+        crumbs.append(crumb)
+    return crumbs
 
-# Function to encrypt a string using AES
-def aes_encrypt(plaintext, key):
-    iv = os.urandom(16)  # Generate a random 16-byte IV
-
-    # Create cipher object using AES in CBC mode
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-
-    # Create encryptor
+def aes_encrypt(data, key):
+    key_bytes = key.to_bytes(16, 'big')
+    iv = os.urandom(16)
+    cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-
-    # Pad the plaintext to be AES block size (16 bytes) compatible
+    
     padder = padding.PKCS7(128).padder()
-    padded_data = padder.update(plaintext.encode()) + padder.finalize()
-
-    # Encrypt the padded data
+    padded_data = padder.update(data.encode()) + padder.finalize()
+    
     ciphertext = encryptor.update(padded_data) + encryptor.finalize()
-
-    # Return the IV concatenated with the ciphertext (to be used in decryption)
     return iv + ciphertext
+
 
 
 # Function to decrypt the AES ciphertext
 def aes_decrypt(ciphertext, key):
-    # Extract the IV from the first 16 bytes
-    iv = ciphertext[:16]
-    actual_ciphertext = ciphertext[16:]
-
-    # Create cipher object using AES in CBC mode
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-
-    # Create decryptor
-    decryptor = cipher.decryptor()
-
-    # Decrypt the data
-    decrypted_data = decryptor.update(actual_ciphertext) + decryptor.finalize()
-
-    # Unpad the decrypted data
-    unpadder = padding.PKCS7(128).unpadder()
-    unpadded_data = unpadder.update(decrypted_data) + unpadder.finalize()
-
-    # Return the original plaintext as a string
-    return unpadded_data.decode()
+    try:
+        key_bytes = key.to_bytes(16, 'big')
+        iv = ciphertext[:16]
+        actual_ciphertext = ciphertext[16:]
+        
+        cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        
+        decrypted_data = decryptor.update(actual_ciphertext) + decryptor.finalize()
+        
+        unpadder = padding.PKCS7(128).unpadder()
+        unpadded_data = unpadder.update(decrypted_data) + unpadder.finalize()
+        
+        return unpadded_data.decode()
+    except Exception:
+        return None
 
 
 def decompose_byte(byte):

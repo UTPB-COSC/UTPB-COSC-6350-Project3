@@ -1,74 +1,90 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
+import struct
 from Crypto import *
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
+HOST = '0.0.0.0'  
+PORT = 5555
+STANDARD_MESSAGE = "quantum secured transmission"
 
-
-# Function to handle client connection
 def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
     try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
-
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
-                    break
-
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
-
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
-                break
-    except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
-    finally:
-        # Attempt to close connection via FIN/ACK method
+        print(f"Client connected from {addr}")
+        print("DEBUG: Starting file read...")
+        
+        # Read and decompose file
+        crumbs = []
         try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+            with open("risk.bmp", "rb") as file:
+                print("Reading file...")
+                # Read file size
+                file.seek(0, 2)
+                file_size = file.tell()
+                file.seek(0)
+                print(f"DEBUG: File size: {file_size} bytes")
+                # Read and decompose file
+                data = file.read()
+                for byte in data:
+                    crumbs.extend(decompose_byte(byte))
+                
+            print(f"File decomposed into {len(crumbs)} crumbs")
+            print("DEBUG: Sending crumb count to client...")
+            
+            # Send total number of crumbs to client
+            conn.sendall(struct.pack('!I', len(crumbs)))
+            
+            # Wait for client acknowledgment
+            ack = conn.recv(1024).decode()
+            if ack != "READY":
+                raise Exception("Client not ready")
+            
+            # Send each crumb
+            for i, crumb in enumerate(crumbs):
+                # Get encryption key for this crumb
+                key = keys[crumb]
+                
+                # Encrypt standard message with this key
+                encrypted = aes_encrypt(STANDARD_MESSAGE, key)
+                
+                # Send index and encrypted data
+                conn.sendall(struct.pack('!I', i))  # Send index
+                conn.sendall(struct.pack('!I', len(encrypted)))  # Send length
+                conn.sendall(encrypted)  # Send encrypted data
+                
+                # Get completion percentage
+                completion = float(conn.recv(1024).decode())
+                print(f"Transfer progress: {completion:.1f}%")
+                
+                if completion >= 100:
+                    break
+            
+            print("File transfer completed")
+            
+        except FileNotFoundError:
+            print("Error: risk.bmp not found")
+            conn.sendall(struct.pack('!I', 0))  # Send 0 crumbs to indicate error
+            
+    except Exception as e:
+        print(f"Error handling client {addr}: {e}")
+    finally:
+        conn.close()
+        print(f"Connection closed with {addr}")
 
-
-# Main server function
 def start_server():
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
-
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((HOST, PORT))
+        server_socket.listen()
+        print(f"Server started, listening on port {PORT}...")
+        
+        try:
             while True:
                 conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
-                executor.submit(handle_client, conn, addr)
-
+                handle_client(conn, addr)
+                
+        except KeyboardInterrupt:
+            print("\nServer shutting down...")
+        except Exception as e:
+            print(f"Error: {e}")
 
 if __name__ == "__main__":
     start_server()
