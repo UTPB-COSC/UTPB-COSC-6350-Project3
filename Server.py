@@ -1,72 +1,76 @@
 import socket
 from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
+import struct
+from Crypto import keys, PAYLOAD, aes_encrypt, decompose_byte
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
+HOST = '0.0.0.0'
+PORT = 5555
+TIMEOUT = 600
+MAX_THREADS = 10
 
 
-# Function to handle client connection
 def handle_client(conn, addr):
     conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
+    print(f"\n[INFO] New connection established with {addr}")
     try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
+        
+        with open("risk.bmp", "rb") as file:
+            file_content = file.read()
 
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
+        crumbs = []
+        for byte in file_content:
+            crumbs.extend(decompose_byte(byte))
+
+        total_crumbs = len(crumbs)
+        print(f"[INFO] Total crumbs to send: {total_crumbs}")
+        conn.sendall(struct.pack('!I', total_crumbs))  
+
+        while True:
+            for i, crumb in enumerate(crumbs):
+                key = keys[crumb]
+                encrypted_payload = aes_encrypt(PAYLOAD, key)
+                conn.sendall(struct.pack('!I', len(encrypted_payload)))  
+                conn.sendall(encrypted_payload)  
+
+                print(f"[DEBUG] Crumb {i}: Encrypted with key {key.hex()}")
+
+            
+            try:
+                completion_data = conn.recv(4)
+                if not completion_data:
+                    print("[WARN] Client disconnected unexpectedly.")
                     break
 
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
+                completion = struct.unpack('!f', completion_data)[0]
+                print(f"[INFO] Client progress: {completion:.2%}")
 
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
+                if completion >= 1.0:
+                    print("[SUCCESS] File fully transmitted and decoded by client.")
+                    conn.sendall(b'ACK')  
+                    break
+
             except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
+                print(f"[ERROR] Timeout waiting for client progress.")
                 break
+
     except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
+        print(f"[ERROR] Error with client {addr}: {e}")
     finally:
-        # Attempt to close connection via FIN/ACK method
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+        conn.close()
+        print(f"[INFO] Connection with {addr} closed.")
 
 
-# Main server function
 def start_server():
     with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((HOST, PORT))
             server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
+            print(f"[INFO] Server started and listening on port {PORT}")
 
             while True:
                 conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
+                print(f"\n[INFO] Incoming connection from {addr}")
                 executor.submit(handle_client, conn, addr)
 
 
