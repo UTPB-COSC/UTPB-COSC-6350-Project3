@@ -5,10 +5,10 @@ from cryptography.hazmat.primitives import padding
 import os
 
 keys = {
-    0b00: 0xd7ffe8f10f124c56918a614acfc65814,
-    0b01: 0x5526736ddd6c4a0592ed33cbc5b1b76d,
-    0b10: 0x88863eef1a37427ea0b867227f09a7c1,
-    0b11: 0x45355f125db4449eb07415e8df5e27d4
+    0b00: bytes.fromhex('d7ffe8f10f124c56918a614acfc65814'),
+    0b01: bytes.fromhex('5526736ddd6c4a0592ed33cbc5b1b76d'),
+    0b10: bytes.fromhex('88863eef1a37427ea0b867227f09a7c1'),
+    0b11: bytes.fromhex('45355f125db4449eb07415e8df5e27d4')
 }
 
 
@@ -73,4 +73,5 @@ def decompose_byte(byte):
 
 
 def recompose_byte(crumbs):
-    return crumbs[3] >> 6 + crumbs[2] >> 4 + crumbs[1] >> 2 + crumbs[0]
+    return (crumbs[3] << 6) + (crumbs[2] << 4) + (crumbs[1] << 2) + crumbs[0]
+
