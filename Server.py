@@ -1,58 +1,47 @@
 import socket
 from concurrent.futures import ThreadPoolExecutor
 from Crypto import *
+import os
+import time
 
 # Constants
 HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
+PORT = 5555  # Port number
+TIMEOUT = 600  # 10 minutes (in seconds)
 MAX_THREADS = 10  # Maximum number of threads in the pool
-
+CIPHER_TEXT = "The quick brown fox jumps over the lazy dog."
 
 # Function to handle client connection
 def handle_client(conn, addr):
     conn.settimeout(TIMEOUT)
     print(f"[INFO] Connection from {addr} established.")
+
     try:
+        with open("input.txt", "rb") as dat_file:
+            file_size = os.path.getsize("input.txt")
+            conn.sendall(str(file_size * 4).encode())  # Send total file size in crumbs
+
+            crumbs = [crumb for byte in dat_file.read() for crumb in decompose_byte(byte)]
+
         while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
+            for crumb in crumbs:
+                key = keys[crumb]
+                ciphertext = aes_encrypt(CIPHER_TEXT, key)
+                conn.sendall(ciphertext)
 
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
-                    break
+                # Await client status update
+                status = conn.recv(1024).decode()
+                if status == "100%":
+                    print(f"[INFO] {addr} has completed file transfer.")
+                    return
 
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
+            print(f"[INFO] Resending crumbs for {addr}.")
+            time.sleep(1)
 
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
-                break
     except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
+        print(f"[ERROR] {e}")
     finally:
-        # Attempt to close connection via FIN/ACK method
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
-
+        conn.close()
 
 # Main server function
 def start_server():
@@ -68,7 +57,6 @@ def start_server():
                 print(f"[INFO] Accepted connection from {addr}.")
                 # Spawn a thread from the pool to handle the connection
                 executor.submit(handle_client, conn, addr)
-
 
 if __name__ == "__main__":
     start_server()
