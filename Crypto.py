@@ -73,4 +73,12 @@ def decompose_byte(byte):
 
 
 def recompose_byte(crumbs):
-    return crumbs[3] >> 6 + crumbs[2] >> 4 + crumbs[1] >> 2 + crumbs[0]
+    # Ensure crumbs is a list of integers
+    if isinstance(crumbs, list) and len(crumbs) == 4:
+        # Recompose the byte by shifting and combining the crumbs
+        recomposed = (crumbs[0] << 6) + (crumbs[1] << 4) + (crumbs[2] << 2) + crumbs[3]
+        
+        # Ensure the recomposed byte is within the valid range (0-255)
+        return recomposed & 0xFF  # Mask to ensure a valid byte value
+    else:
+        raise ValueError("Expected a list of 4 integer crumbs.")

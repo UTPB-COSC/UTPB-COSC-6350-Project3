@@ -1,74 +1,78 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
+import threading
+import json
+from Crypto import aes_encrypt, decompose_byte  # Import functions from your crypto file
 
-# Constants
-HOST = '0.0.0.0'  # Listen on all interfaces
-PORT = 5555       # Port number
-TIMEOUT = 600     # 10 minutes (in seconds)
-MAX_THREADS = 10  # Maximum number of threads in the pool
+# Load keys from keys.json
+def load_keys_from_json(file_path):
+    with open(file_path, "r") as f:
+        keys_hex = json.load(f)
+    # Convert keys from hex string to bytes
+    keys = {
+        int(k, 2): bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
+    }
+    return keys
 
+keys = load_keys_from_json("keys.json")
 
-# Function to handle client connection
-def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
-    try:
-        while True:
-            try:
-                file_size = 0
-                crumbs = []
-                with open("risk.bmp", "rb") as dat_file:
-                    dat_file.seek(0, 2)
-                    file_size = dat_file.tell()
-                    dat_file.seek(0)
-                    for x in range(file_size):
-                        for crumb in decompose_byte(dat_file.read(1)):
-                            crumbs.append(crumb)
+PORT = 5555
 
-                # Wait for data from the client
-                data = conn.recv(1024)
-                if not data:
-                    print(f"[INFO] Connection from {addr} closed by client.")
-                    break
+def handle_client(conn, addr, file_data):
+    crumbs = [crumb for byte in file_data for crumb in decompose_byte(byte)]
+    total_crumbs = len(crumbs)
+    print(f"[SERVER] Total crumbs to send: {total_crumbs}")
 
-                if len(data) > 0:
-                    print(f"[DATA] {data.decode('utf-8', errors='replace')}")
+    conn.send(str(total_crumbs).encode())  # Send total crumbs to client
 
-                    # Send an ACK (just acknowledge the data)
-                    conn.sendall(b'ACK')
-                else:
-                    print(f"[WARN] Incomplete packet from {addr}.")
-            except socket.timeout:
-                print(f"[INFO] Connection from {addr} timed out.")
-                break
-    except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
-    finally:
-        # Attempt to close connection via FIN/ACK method
+    crumbs_sent = 0
+    crumb_index = 1
+    while crumbs_sent < total_crumbs:
+        crumb = crumbs[crumbs_sent]
+        print(f"[SERVER] Encrypting crumb {crumb} with key {bin(crumb)}")
+        print(f"[SERVER] Crumb value: {crumb}, Index: {crumb_index}")
+        encrypted_data = aes_encrypt(str(crumb), keys[crumb]) # Encrypt the crumb with its specific key
+        crumbs_sent += 1
+        crumb_index += 1
+        conn.send(encrypted_data)
+
+    while True:
         try:
-            conn.shutdown(socket.SHUT_RDWR)
+            ack = conn.recv(1024).decode()
+            if ack == "ACK":
+                print(f"[SERVER] Client acknowledged crumbs recieved.")
+                print("[SERVER] All crumbs sent successfully.")
+            elif ack == "NACK":
+                print(f"[SERVER] Client failed get crumbs.")
+            elif ack.startswith("PROGRESS:"):
+                # Extract and display the progress percentage
+                progress = ack.split(":")[1]
+                print(f"[SERVER] Client progress: {progress}%")
+            else:
+                print("[SERVER] Client closed connection.")
+                break
+        except ConnectionResetError as e:
+            print(f"[SERVER] Connection reset: {e}")
             conn.close()
-        except Exception as e:
-            print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+    conn.close()
 
-
-# Main server function
 def start_server():
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create a socket
+    server.bind(("", PORT))  # Bind the server to the specified port
+    server.listen(5)  # Listen for incoming connections (queue up to 5 clients)
+    print(f"[LISTENING] Server is listening on port {PORT}")
 
-            while True:
-                conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
-                # Spawn a thread from the pool to handle the connection
-                executor.submit(handle_client, conn, addr)
+    # Read file data to be sent to the client
+    with open("data.txt", "rb") as f:  
+        file_data = f.read()
 
+    while True:  # Continuously accept new connections
+        conn, addr = server.accept()  # Accept a new connection
+        print(f"[NEW CONNECTION] {addr} connected.")
+
+        # Start a new thread for handling the connected client
+        thread = threading.Thread(target=handle_client, args=(conn, addr, file_data))
+        thread.start()
+        print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
 
 if __name__ == "__main__":
     start_server()
