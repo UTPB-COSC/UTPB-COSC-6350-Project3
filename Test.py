@@ -1,4 +1,3 @@
-
 from Crypto import *
 
 file_size = 0
@@ -7,7 +6,7 @@ with open("risk.bmp", "rb") as dat_file:
     dat_file.seek(0, 2)
     file_size = dat_file.tell()
     dat_file.seek(0)
-    for x in range(16):
+    for x in range(file_size):
         for crumb in decompose_byte(dat_file.read(1)[0]):
             crumbs.append(crumb)
 
