@@ -1,7 +1,5 @@
-# UTPB-COSC-6350-Project3
-This repo contains the assignment for Project 3 of the graduate Wireless Security class.
 
-The goal of this project is to implement the "Quantum Crypto" polarized light algorithm described in class.
+The goal of this project is to implement the "Quantum Crypto" polarized light algorithm.
 
 Using either Java, Python, or C#, create an implementation of the algorithm which transmits data from a server to a client.  The server will load a file from disk and transmit it to the client two bits at a time, with each pair of bits encoded as either horizontally, vertically, clockwise, or counterclockwise polarized light.  The server should create a standard payload (say, "The quick brown fox jumps over the lazy dog.") which is transmitted in each packet.  The encoding of the bits of the message will actually be contained within the encryption key used for the message and not the plaintext itself.
 
